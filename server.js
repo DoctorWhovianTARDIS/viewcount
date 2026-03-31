@@ -2,6 +2,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const cors = require('cors');
 
 const DATA_FILE = path.join(__dirname, 'visitors.json');
 const TEMP_FILE = path.join(__dirname, 'visitors.json.tmp');
@@ -11,6 +12,11 @@ const app = express();
 app.use(express.json());
 app.set('trust proxy', true);
 
+// Allow your static site origin to call the API
+// Replace the origin below with your site origin if different
+app.use(cors({ origin: 'https://francis.quest' }));
+
+// Simple in-process mutex to serialize file operations
 let lock = Promise.resolve();
 function withLock(fn) {
   lock = lock.then(() => fn()).catch(() => fn());
@@ -55,6 +61,24 @@ function getClientIp(req) {
   return null;
 }
 
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
+// GET count
+app.get('/api/count', (req, res) => {
+  withLock(() => {
+    ensureDataFile();
+    const store = readStore();
+    return Promise.resolve(res.json({ count: store.ips.length }));
+  }).catch(err => {
+    console.error('Lock error', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal error' });
+  });
+});
+
+// POST visit
 app.post('/api/visit', (req, res) => {
   const rawIp = getClientIp(req);
   const ip = normalizeIp(rawIp);
@@ -78,11 +102,16 @@ app.post('/api/visit', (req, res) => {
   });
 });
 
-app.get('/api/count', (req, res) => {
+// Optional clear endpoint (protect with CLEAR_SECRET env var)
+app.post('/api/clear', (req, res) => {
+  const secret = process.env.CLEAR_SECRET || '';
+  if (!secret || req.body.secret !== secret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   withLock(() => {
-    ensureDataFile();
-    const store = readStore();
-    return Promise.resolve(res.json({ count: store.ips.length }));
+    const store = { ips: [] };
+    try { writeStoreAtomic(store); } catch (err) { console.error('Failed to clear store', err); }
+    return Promise.resolve(res.json({ count: 0 }));
   }).catch(err => {
     console.error('Lock error', err);
     if (!res.headersSent) res.status(500).json({ error: 'Internal error' });
