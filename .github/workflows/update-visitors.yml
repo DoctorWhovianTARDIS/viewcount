@@ -8,10 +8,10 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Get visitor IP from payload
+      - name: Read visitor IP from payload
         run: |
           echo "VISITOR_IP=${{ github.event.client_payload.ip }}" >> $GITHUB_ENV
 
@@ -25,19 +25,16 @@ jobs:
       - name: Add IP to all-time.json if missing
         run: |
           FILE=all-time.json
-          # If IP not present, append it
-          if ! jq -e --arg ip "$VISITOR_IP" 'index($ip) // empty' "$FILE" >/dev/null 2>&1; then
-            jq --arg ip "$VISITOR_IP" '. + [$ip]' "$FILE" > tmp.json && mv tmp.json "$FILE"
-          fi
+          TMP=tmp_all_time.json
+          # Safely add the IP only if it's not already present
+          jq --arg ip "$VISITOR_IP" 'if index($ip) then . else . + [$ip] end' "$FILE" > "$TMP" && mv "$TMP" "$FILE"
 
-      - name: Commit changes
+      - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add all-time.json
           git commit -m "Log visit from $VISITOR_IP" || echo "No changes to commit"
-
-      - name: Push changes
-        uses: ad-m/github-push-action@v0.6.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          git push origin HEAD:$(git rev-parse --abbrev-ref HEAD)
