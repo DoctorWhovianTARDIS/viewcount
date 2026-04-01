@@ -16,8 +16,6 @@ if (!PAT) {
 
 const app = express();
 app.use(bodyParser.json());
-
-// Serve static site from /public
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Simple in-process mutex to serialize updates
