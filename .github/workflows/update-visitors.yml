@@ -1,0 +1,43 @@
+name: Update All-Time Visitors
+
+on:
+  repository_dispatch:
+    types: [log_visit]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Get visitor IP from payload
+        run: |
+          echo "VISITOR_IP=${{ github.event.client_payload.ip }}" >> $GITHUB_ENV
+
+      - name: Ensure all-time.json exists
+        run: |
+          FILE=all-time.json
+          if [ ! -f "$FILE" ]; then
+            echo "[]" > "$FILE"
+          fi
+
+      - name: Add IP to all-time.json if missing
+        run: |
+          FILE=all-time.json
+          # If IP not present, append it
+          if ! jq -e --arg ip "$VISITOR_IP" 'index($ip) // empty' "$FILE" >/dev/null 2>&1; then
+            jq --arg ip "$VISITOR_IP" '. + [$ip]' "$FILE" > tmp.json && mv tmp.json "$FILE"
+          fi
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add all-time.json
+          git commit -m "Log visit from $VISITOR_IP" || echo "No changes to commit"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
